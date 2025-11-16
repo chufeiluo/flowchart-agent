@@ -50,14 +50,14 @@ class FlowchartTask:
         assert self.type == 'llm', 'node type mismatch, must be an llm call'
 
         inp_form = f'Input Format: {self.inputFormat}'
-        out_form = f'Output Format: {self.outputFormat}'
+        out_form = f'Output Format: {self.outputFormat}'    
 
         keys = re.findall(r'(\[(.*?)\])', self.instructions)
         # print(keys)
         instructions = self.instructions
         for k in keys:
-            print(k[0], input[k[1]].value)
-            print('**************************************************************************\n\n\n\n')
+            # print(k[0], input[k[1]].value)
+            # print('**************************************************************************\n\n\n\n')
             instructions = instructions.replace(k[0], input[k[1]].value)
 
         return f"""{instructions}
@@ -71,11 +71,28 @@ class FlowchartTaskResult:
         self.executionDetails = executionDetails
 
     def __dict__(self):
-        return {'value': self.value, 'executionDetails': ([x.content for x in self.executionDetails['promptMessages']] if 'promptMessages' in self.executionDetails else self.executionDetails)}
+        if 'promptMessages' in self.executionDetails:
+            execution_details = {
+                **self.executionDetails,
+                'promptMessages': [x.content for x in self.executionDetails['promptMessages']]
+            }
+        else:
+            execution_details = self.executionDetails
+
+        return {'value': self.value, 'executionDetails': execution_details}
+    
     def __repr__(self):
         return f"FlowchartNodeOutput(value={self.value.__repr__()}, executionDetails={self.executionDetails.__repr__()})"
+    
+    
 
-
+class DebugMessage: # LLM func. debug class - use when testing functionality of new benchmarking features
+    def __init__(self, content):
+        self.content = content
+        
+    def __dict__(self):
+        return {'content':self.content}
+        
 # This is a linear flowchart structure, the nodes are connected in a sequence.
 class Flowchart:
     # nodes: List[FlowchartTask]
@@ -94,9 +111,10 @@ class Flowchart:
         assert isinstance(
                 node, FlowchartTask), "node must be a FlowchartTask instance"
         
-        if 'supporting_docs' in input:
-            input['docs'] = FlowchartTaskResult(value='\n'.join(['{0}: {1}'.format(x['name'], x['content']) for x in input['supporting_docs'].value])
-, executionDetails={})
+        if 'supporting_docs' in input:            
+            input['docs'] = FlowchartTaskResult(value='\n'.join(
+                ['{0}: {1}'.format(x['name'], x['content']) for x in input['supporting_docs'].value]
+            ), executionDetails={})
         messages = [
             SystemMessage(content="You are a helpful assistant. Please answer the user's input as factually as possible."),
             HumanMessage(content=node.to_prompt(input)),
@@ -104,7 +122,9 @@ class Flowchart:
         count = 0
         while count < 3:
             try:
+                # Comment out llm line and uncomment Debug one if testing new feaures (to avoid unnecessary LLM calls)
                 response = llm.invoke(messages)
+                # response = DebugMessage('{"answer": "response", "analysis": "something"}').__dict__()  
 
                 # print(response.content, re.sub(r'\`\`\`.*', '', response.content))
                 temp = json.loads(re.sub(r',(?=\n})', '', re.sub(r'\`\`\`.*', '', response.content)).strip().replace('\n', ''))
@@ -114,20 +134,26 @@ class Flowchart:
                 print('retrying')
                 count += 1
 
-        return FlowchartTaskResult(value=f"{temp['answer']}\n{temp['analysis']}", executionDetails={"promptMessages": messages, "original": temp, "response": response})
-
+        assert temp, "llm_execution did not get a good response within 3 attempts."
+        return FlowchartTaskResult(
+            value=f"{temp['answer']}\n{temp['analysis']}", 
+            executionDetails={"promptMessages": messages, "original": temp, "response": response}
+        )
 
     def api_execution(self, node: FlowchartTask, input, headers={}) -> FlowchartTaskResult:
         if node.url in REQUESTS_MAPPING:
             # print(input)
-            text, res = REQUESTS_MAPPING[node.url](node, input, headers)
+            text, res, eval = REQUESTS_MAPPING[node.url](node, input, headers)
         else:
             return "Not supported"
         
 
         out = OUTPUT_FORMAT_MAPPING[node.url](text)
         
-        return FlowchartTaskResult(value='\n**********\n'.join(out), executionDetails={'full_response': res, 'input': input})
+        return FlowchartTaskResult(
+            value='\n**********\n'.join(out), 
+            executionDetails={'full_response': res, 'input': input, 'eval': eval}
+        )
 
 
     def execute(self, input: Any) -> List[FlowchartTaskResult]:
@@ -137,8 +163,12 @@ class Flowchart:
         """
         assert isinstance(
             self.nodes, list), "flowchart must be a list of FlowchartTask instances"
-        print(input.keys())
-        results = {'supporting_docs': FlowchartTaskResult(value=input['supporting_docs'], executionDetails={}),
+        
+        # if len(input['supporting_docs'][1]) > 1:
+        #     print(f"Supporting docs: elem 0 (golden label) has {len(input['supporting_docs'][0])} elements")
+        #     print(f"Supporting docs: elem 1 (supporting docs) has {len(input['supporting_docs'][1])} elements, each elem is a {type(input['supporting_docs'][1][0])}")
+            
+        results = {'supporting_docs': FlowchartTaskResult(value=input['supporting_docs'][1], executionDetails={}),
                     'input': FlowchartTaskResult(value=input['query'], executionDetails={}),
                     }
         for node in self.nodes:

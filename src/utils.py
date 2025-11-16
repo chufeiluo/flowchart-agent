@@ -3,7 +3,8 @@ import os, re
 from pdf.PineconePDFExtractor import PdfProcessor
 
 import tiktoken
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+# from langchain.text_splitter import RecursiveCharacterTextSplitter
 import requests
 from copy import deepcopy
 from langchain_community.document_loaders.image import UnstructuredImageLoader
@@ -89,8 +90,6 @@ def split_docs(data_dir):
     gold = []
     for fn in os.listdir(data_dir):
         print(fn)
-        if fn.startswith('Benchmark'):
-            continue
         try:
             # extractor = PyPDFLoader(1)
             if fn.endswith('.pdf'):
@@ -107,11 +106,13 @@ def split_docs(data_dir):
                 data.extend(temp)
                 print(data)
                 continue
-            if fn.lower().startswith('benchmark'):
-                gold.append({'name': '.'.join(fn.split('.')[:-1]), 'content': re.sub(r'[\s]{3,}', '\n\n', '\n'.join([x.strip() for x in text])).strip()})
+            # Skip `gold` population, with cleaner logic.
+                # Isolates skip to this block of the for-loop instead of having continue statements at the top
+            # if fn.lower().startswith('benchmark'):
+            #     gold.append({'name': '.'.join(fn.split('.')[:-1]), 'content': re.sub(r'[\s]{3,}', '\n\n', '\n'.join([x.strip() for x in text])).strip()})
 
-            else:
-                data.append({'name': '.'.join(fn.split('.')[:-1]), 'content': re.sub(r'[\s]{3,}', '\n\n', '\n'.join([x.strip() for x in text])).strip()})
+            # else:
+            data.append({'name': '.'.join(fn.split('.')[:-1]), 'content': re.sub(r'[\s]{3,}', '\n\n', '\n'.join([x.strip() for x in text])).strip()})
 
         except Exception as e:
             print(f"Warning {os.path.join(data_dir, fn)}: {e}")
@@ -134,3 +135,15 @@ def split_upsert(data_dir, namespace):
 
         for chunk in chunked_texts:
             upload(chunk, namespace)
+            
+
+def top_k_precision(predicted, actual, k):
+    """
+    Calculate precision@k for string labels.
+    Primarily used for evaluating retrieved vectors.
+    Returns a precision@k score.
+    """
+    actual_set = set(actual)
+    top_k_pred = predicted[:k]
+    relevant_count = sum(1 for pred in top_k_pred if pred in actual_set)
+    return relevant_count / k

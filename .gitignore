@@ -199,7 +199,10 @@ cython_debug/
 
 src/usecases/**
 src/flowcharts/**
-src/data/**
+src/data/results/*
+src/data/*.jsonl
 src/glob.py
+src/sample.json
 activate/
 UltraFeedback/
+*swiss*
